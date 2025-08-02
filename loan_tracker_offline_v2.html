@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>บันทึกเงินกู้ (ออฟไลน์)</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; background-color: #f4f4f4; color: #333; }
+    label, input, button, select { display: block; margin: 0.5rem 0; font-size: 1rem; }
+    input, select { padding: 0.5rem; width: 100%; box-sizing: border-box; }
+    button { padding: 0.5rem 1rem; background-color: #2d89ef; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background-color: #1b65c1; }
+    table { border-collapse: collapse; margin-top: 2rem; width: 100%; background-color: white; }
+    th, td { border: 1px solid #ccc; padding: 0.75rem; text-align: left; }
+    th { background-color: #e0e0e0; }
+    .hidden { display: none; }
+    .action-buttons { display: flex; gap: 0.5rem; }
+    .danger { background-color: #e53935; }
+    .danger:hover { background-color: #c62828; }
+    .success { background-color: #43a047; }
+    .success:hover { background-color: #2e7d32; }
+  </style>
+</head>
+<body>
+  <h2>หน้ากรอกข้อมูลเงินกู้</h2>
+  <form id="loanForm">
+    <label>ชื่อผู้กู้: <input type="text" id="borrower" required></label>
+    <label>ชื่อคนค้ำ: <input type="text" id="guarantor"></label>
+    <label>จำนวนเงิน (บาท): <input type="number" id="amount" required></label>
+    <label>เปอร์เซ็นต์ดอกเบี้ย: <input type="number" id="interest" required></label>
+    <label>วันที่กู้: <input type="date" id="borrowDate" required></label>
+    <label>คืนภายในกี่วัน: <input type="number" id="daysToReturn"></label>
+    <label>หรือคืนวันที่: <input type="date" id="returnDate"></label>
+    <button type="submit">บันทึก</button>
+  </form>
+
+  <h2>เข้าถึงหน้าสรุปข้อมูล</h2>
+  <div id="passwordPrompt">
+    <label>กรอกรหัสผ่านเพื่อดูข้อมูล: <input type="password" id="passwordInput"></label>
+    <button onclick="checkPassword()">ยืนยัน</button>
+    <p id="passwordMessage" style="color: red;"></p>
+  </div>
+
+  <div id="summarySection" class="hidden">
+    <h2>หน้าสรุปข้อมูล</h2>
+    <div>
+      <label>เลือกเดือน: <select id="monthFilter"><option value="">-- แสดงทั้งหมด --</option></select></label>
+      <label>ดูข้อมูลเฉพาะบุคคล: <input type="text" id="filterName" placeholder="พิมพ์ชื่อแล้วกด Enter"></label>
+    </div>
+    <div id="monthSummaries"></div>
+    <table id="summaryTable">
+      <thead>
+        <tr>
+          <th>ชื่อผู้กู้</th>
+          <th>วันที่กู้</th>
+          <th>วันที่จะคืน</th>
+          <th>จำนวนเงิน</th>
+          <th>ดอกเบี้ย (%)</th>
+          <th>ดอกเบี้ย (บาท)</th>
+          <th>สถานะ</th>
+          <th>จัดการ</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+<script>
+  const form = document.getElementById('loanForm');
+  const summaryTable = document.getElementById('summaryTable').querySelector('tbody');
+  const monthSummaries = document.getElementById('monthSummaries');
+  const filterName = document.getElementById('filterName');
+  const monthFilter = document.getElementById('monthFilter');
+  const passwordInput = document.getElementById('passwordInput');
+  const passwordMessage = document.getElementById('passwordMessage');
+  const summarySection = document.getElementById('summarySection');
+
+  const accessPassword = "1234";
+  let loans = [];
+
+  window.onload = () => {
+    const stored = localStorage.getItem("loans");
+    if (stored) loans = JSON.parse(stored);
+  };
+
+  function checkPassword() {
+    if (passwordInput.value === accessPassword) {
+      summarySection.classList.remove('hidden');
+      document.getElementById('passwordPrompt').classList.add('hidden');
+      renderTable();
+    } else {
+      passwordMessage.textContent = "รหัสผ่านไม่ถูกต้อง";
+    }
+  }
+
+  function saveToLocal() {
+    localStorage.setItem("loans", JSON.stringify(loans));
+  }
+
+  function renderTable() {
+    summaryTable.innerHTML = '';
+    monthSummaries.innerHTML = '';
+
+    let filtered = loans;
+    const name = filterName.value.trim();
+    const selectedMonth = monthFilter.value;
+    if (name) filtered = filtered.filter(l => l.borrower.includes(name));
+    if (selectedMonth) filtered = filtered.filter(l => l.returnDate.startsWith(selectedMonth));
+
+    const grouped = {};
+    for (const loan of filtered) {
+      const month = loan.returnDate.slice(0, 7);
+      if (!grouped[month]) grouped[month] = [];
+      grouped[month].push(loan);
+    }
+
+    const allMonths = [...new Set(loans.map(l => l.returnDate.slice(0, 7)))].sort();
+    monthFilter.innerHTML = '<option value="">-- แสดงทั้งหมด --</option>';
+    allMonths.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      if (m === selectedMonth) opt.selected = true;
+      monthFilter.appendChild(opt);
+    });
+
+    for (const month in grouped) {
+      const data = grouped[month];
+      let total = 0, interestTotal = 0;
+      data.forEach(l => {
+        total += parseFloat(l.amount);
+        interestTotal += (parseFloat(l.amount) * parseFloat(l.interest) / 100);
+      });
+      const div = document.createElement('div');
+      div.innerHTML = `<strong>${month}</strong>: ปล่อยกู้รวม ${total} บาท, ดอกเบี้ยรวม ${interestTotal.toFixed(2)} บาท`;
+      monthSummaries.appendChild(div);
+
+      const sorted = data.sort((a, b) => new Date(a.returnDate) - new Date(b.returnDate));
+      for (const loan of sorted) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${loan.borrower}</td>
+          <td>${loan.borrowDate}</td>
+          <td>${loan.returnDate}</td>
+          <td>${loan.amount}</td>
+          <td>${loan.interest}</td>
+          <td>${((loan.amount * loan.interest) / 100).toFixed(2)}</td>
+          <td>${loan.status}</td>
+          <td class="action-buttons">
+            <button class="success" onclick="markAsReturned('${loan.id}')">คืนแล้ว</button>
+            <button class="danger" onclick="confirmDelete('${loan.id}')">ลบ</button>
+          </td>
+        `;
+        summaryTable.appendChild(row);
+      }
+    }
+  }
+
+  function markAsReturned(id) {
+    const loan = loans.find(l => l.id === id);
+    if (loan) {
+      loan.status = "คืนแล้ว";
+      saveToLocal();
+      renderTable();
+    }
+  }
+
+  function confirmDelete(id) {
+    const pwd = prompt("กรอกรหัสผ่านเพื่อยืนยันการลบ:");
+    if (pwd === accessPassword) {
+      loans = loans.filter(l => l.id !== id);
+      saveToLocal();
+      renderTable();
+    } else {
+      alert("รหัสผ่านไม่ถูกต้อง");
+    }
+  }
+
+  form.onsubmit = e => {
+    e.preventDefault();
+    const borrower = document.getElementById('borrower').value;
+    const guarantor = document.getElementById('guarantor').value;
+    const amount = parseFloat(document.getElementById('amount').value);
+    const interest = parseFloat(document.getElementById('interest').value);
+    const borrowDate = document.getElementById('borrowDate').value;
+    const daysToReturn = parseInt(document.getElementById('daysToReturn').value);
+    const returnDateInput = document.getElementById('returnDate').value;
+
+    let returnDate = returnDateInput;
+    if (!returnDate && daysToReturn) {
+      const bd = new Date(borrowDate);
+      bd.setDate(bd.getDate() + daysToReturn);
+      returnDate = bd.toISOString().split('T')[0];
+    }
+
+    if (!returnDate) {
+      alert("กรุณาระบุจำนวนวันหรือวันที่จะคืน");
+      return;
+    }
+
+    const loan = {
+      id: Date.now().toString(),
+      borrower, guarantor, amount, interest, borrowDate, returnDate, status: 'ยังไม่คืน'
+    };
+
+    loans.push(loan);
+    saveToLocal();
+    form.reset();
+    renderTable();
+  };
+
+  filterName.onkeyup = e => { if (e.key === 'Enter') renderTable(); };
+  monthFilter.onchange = renderTable;
+</script>
+</body>
+</html>
